@@ -1,0 +1,29 @@
+{
+  "quotes": [
+    {
+      "id": 1,
+      "text": "lalala",
+      "category": "motivation",
+      "author": "cladzzz",
+      "created_at": "2025-11-07T16:01:07.855034",
+      "is_ai_generated": false
+    },
+    {
+      "id": 2,
+      "text": "nothing is permanent",
+      "category": "life",
+      "author": "Anonymous",
+      "created_at": "2025-11-07T16:02:39.380776",
+      "is_ai_generated": false
+    },
+    {
+      "id": 3,
+      "text": "The difference between ordinary and extraordinary is that little extra.",
+      "category": "motivation",
+      "author": "AI Generated",
+      "created_at": "2025-11-07T16:03:26.997228",
+      "is_ai_generated": false
+    }
+  ],
+  "next_id": 4
+}

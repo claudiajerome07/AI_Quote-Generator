@@ -5,6 +5,10 @@ from dotenv import load_dotenv
 import os
 import random
 import re
+from typing import List, Optional
+from pydantic import BaseModel
+import json
+from datetime import datetime
 
 load_dotenv()
 
@@ -55,6 +59,59 @@ if api_key:
 else:
     print("❌ No API key found!")
 
+# Pydantic models for request/response
+class QuoteCreate(BaseModel):
+    text: str
+    category: str
+    author: Optional[str] = "User"
+
+class QuoteUpdate(BaseModel):
+    text: Optional[str] = None
+    category: Optional[str] = None
+    author: Optional[str] = None
+
+class QuoteResponse(BaseModel):
+    id: int
+    text: str
+    category: str
+    author: str
+    created_at: str
+    is_ai_generated: bool
+
+# In-memory storage (in production, use a database)
+quotes_db = []
+next_id = 1
+DATA_FILE = "quotes_data.json"
+
+def load_quotes_from_file():
+    """Load quotes from JSON file"""
+    global quotes_db, next_id
+    try:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, 'r') as f:
+                data = json.load(f)
+                quotes_db = data.get('quotes', [])
+                next_id = data.get('next_id', 1)
+            print(f"📂 Loaded {len(quotes_db)} quotes from file")
+    except Exception as e:
+        print(f"❌ Error loading quotes: {e}")
+
+def save_quotes_to_file():
+    """Save quotes to JSON file"""
+    try:
+        data = {
+            'quotes': quotes_db,
+            'next_id': next_id
+        }
+        with open(DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        print(f"💾 Saved {len(quotes_db)} quotes to file")
+    except Exception as e:
+        print(f"❌ Error saving quotes: {e}")
+
+# Load existing quotes on startup
+load_quotes_from_file()
+
 def clean_ai_response(text: str) -> str:
     """Clean up AI response to get a single clean quote"""
     if not text:
@@ -102,9 +159,11 @@ def health_check():
     return {
         "status": "healthy" if model else "error",
         "model_ready": model is not None,
-        "model_name": model_name
+        "model_name": model_name,
+        "total_quotes": len(quotes_db)
     }
 
+# CREATE - Generate new AI quote
 @app.get("/quote")
 def get_ai_quote(category: str = "motivation"):
     if not model:
@@ -189,3 +248,113 @@ def get_ai_quote(category: str = "motivation"):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+# CREATE - Add a custom quote
+@app.post("/quotes", response_model=QuoteResponse)
+def create_quote(quote: QuoteCreate):
+    global next_id
+    try:
+        new_quote = {
+            "id": next_id,
+            "text": quote.text,
+            "category": quote.category,
+            "author": quote.author,
+            "created_at": datetime.now().isoformat(),
+            "is_ai_generated": False
+        }
+        
+        quotes_db.append(new_quote)
+        next_id += 1
+        save_quotes_to_file()
+        
+        return QuoteResponse(**new_quote)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating quote: {str(e)}")
+
+# READ - Get all quotes
+@app.get("/quotes", response_model=List[QuoteResponse])
+def get_all_quotes(category: Optional[str] = None, author: Optional[str] = None):
+    try:
+        filtered_quotes = quotes_db
+        
+        if category:
+            filtered_quotes = [q for q in filtered_quotes if q["category"].lower() == category.lower()]
+        
+        if author:
+            filtered_quotes = [q for q in filtered_quotes if q["author"].lower() == author.lower()]
+        
+        return [QuoteResponse(**quote) for quote in filtered_quotes]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving quotes: {str(e)}")
+
+# READ - Get specific quote by ID
+@app.get("/quotes/{quote_id}", response_model=QuoteResponse)
+def get_quote(quote_id: int):
+    try:
+        quote = next((q for q in quotes_db if q["id"] == quote_id), None)
+        if not quote:
+            raise HTTPException(status_code=404, detail="Quote not found")
+        return QuoteResponse(**quote)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving quote: {str(e)}")
+
+# UPDATE - Update a quote
+@app.put("/quotes/{quote_id}", response_model=QuoteResponse)
+def update_quote(quote_id: int, quote_update: QuoteUpdate):
+    try:
+        quote_index = next((i for i, q in enumerate(quotes_db) if q["id"] == quote_id), None)
+        if quote_index is None:
+            raise HTTPException(status_code=404, detail="Quote not found")
+        
+        # Update only provided fields
+        if quote_update.text is not None:
+            quotes_db[quote_index]["text"] = quote_update.text
+        if quote_update.category is not None:
+            quotes_db[quote_index]["category"] = quote_update.category
+        if quote_update.author is not None:
+            quotes_db[quote_index]["author"] = quote_update.author
+        
+        save_quotes_to_file()
+        return QuoteResponse(**quotes_db[quote_index])
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating quote: {str(e)}")
+
+# DELETE - Delete a quote
+@app.delete("/quotes/{quote_id}")
+def delete_quote(quote_id: int):
+    try:
+        global quotes_db
+        initial_length = len(quotes_db)
+        quotes_db = [q for q in quotes_db if q["id"] != quote_id]
+        
+        if len(quotes_db) == initial_length:
+            raise HTTPException(status_code=404, detail="Quote not found")
+        
+        save_quotes_to_file()
+        return {"message": "Quote deleted successfully", "deleted_id": quote_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting quote: {str(e)}")
+
+# DELETE - Delete all quotes (use with caution)
+@app.delete("/quotes")
+def delete_all_quotes(confirm: bool = False):
+    if not confirm:
+        raise HTTPException(
+            status_code=400, 
+            detail="Must confirm deletion by setting confirm=true"
+        )
+    
+    try:
+        global quotes_db
+        deleted_count = len(quotes_db)
+        quotes_db = []
+        save_quotes_to_file()
+        return {"message": f"All {deleted_count} quotes deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting quotes: {str(e)}")

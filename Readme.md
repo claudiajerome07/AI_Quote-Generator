@@ -83,6 +83,10 @@ Users can select any category to generate a relevant AI-crafted quote.
 
 ---
 
+## 🚀 Main Frontend Component
+
+![App Screenshot](./Main%20component.png)
+
 ## 👩‍💻 Author
 
 **Claudia Jerome**  
